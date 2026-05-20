@@ -1,0 +1,139 @@
+# =============================================================================
+# PZEM Logger – ESP32 Firmware Build
+# =============================================================================
+# Triggered on every push / PR to main, and manually via "Run workflow".
+# Produces a ready-to-flash .bin + .elf as a GitHub Release artifact.
+# =============================================================================
+
+name: Build ESP32 Firmware
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:           # lets you click "Run workflow" in the GitHub UI
+
+jobs:
+  build:
+    name: Compile for ESP32-WROOM
+    runs-on: ubuntu-22.04      # pinned Ubuntu version – never changes under you
+
+    steps:
+
+    # ── 1. Checkout ──────────────────────────────────────────────────────────
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # ── 2. Install arduino-cli (pinned version) ───────────────────────────────
+    - name: Install arduino-cli 0.35.3
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+          | BINDIR=/usr/local/bin sh -s 0.35.3
+        arduino-cli version
+
+    # ── 3. Configure arduino-cli (board manager URL for ESP32) ───────────────
+    - name: Configure arduino-cli
+      run: |
+        arduino-cli config init
+        arduino-cli config set board_manager.additional_urls \
+          https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+
+    # ── 4. Update index + install ESP32 core (pinned) ────────────────────────
+    - name: Install ESP32 Arduino core 2.0.17
+      run: |
+        arduino-cli core update-index
+        arduino-cli core install esp32:esp32@2.0.17
+
+    # ── 5. Install all required libraries (pinned versions) ──────────────────
+    #   PZEM004Tv30  – reads the power meter over Serial2
+    #   SD           – bundled in the ESP32 core (no separate install needed)
+    #   WebServer    – bundled in the ESP32 core
+    #   DNSServer    – bundled in the ESP32 core
+    #   ESPmDNS      – bundled in the ESP32 core
+    - name: Install third-party libraries
+      run: |
+        arduino-cli lib install "PZEM-004T-v30@1.1.2"
+
+    # ── 6. Sketch must live in a folder with the same name as the .ino ───────
+    #   Our repo root already is PZEM_Logger/ if you name it that, but the
+    #   workflow creates a temporary symlink just in case the repo is named
+    #   differently (e.g. "electrocution").
+    - name: Prepare sketch directory
+      run: |
+        SKETCH_DIR="${GITHUB_WORKSPACE}/PZEM_Logger"
+        if [ ! -d "$SKETCH_DIR" ]; then
+          # .ino lives in repo root → wrap in correctly named subfolder
+          mkdir -p "$SKETCH_DIR"
+          # Copy everything; arduino-cli will ignore non-source files
+          cp "${GITHUB_WORKSPACE}"/*.ino \
+             "${GITHUB_WORKSPACE}"/*.h   \
+             "${GITHUB_WORKSPACE}"/*.cpp \
+             "$SKETCH_DIR/" 2>/dev/null || true
+        fi
+        echo "SKETCH_DIR=$SKETCH_DIR" >> $GITHUB_ENV
+
+    # ── 7. Compile ────────────────────────────────────────────────────────────
+    - name: Compile firmware
+      run: |
+        arduino-cli compile \
+          --fqbn esp32:esp32:esp32 \
+          --build-property "build.partitions=default" \
+          --export-binaries \
+          --warnings default \
+          --verbose \
+          "$SKETCH_DIR"
+
+    # ── 8. Collect output files ───────────────────────────────────────────────
+    - name: Collect build artefacts
+      run: |
+        BUILD_DIR=$(find "$SKETCH_DIR/build" -maxdepth 2 -name "*.bin" \
+                    | head -1 | xargs dirname)
+        echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+
+        # Rename to something human-friendly with the commit SHA
+        SHORT_SHA="${GITHUB_SHA::7}"
+        mkdir -p /tmp/firmware
+        cp "$BUILD_DIR/PZEM_Logger.ino.bin"  "/tmp/firmware/PZEM_Logger_${SHORT_SHA}.bin"
+        cp "$BUILD_DIR/PZEM_Logger.ino.elf"  "/tmp/firmware/PZEM_Logger_${SHORT_SHA}.elf"
+        # Bootloader + partition table – handy for first-time flashing
+        cp "$BUILD_DIR/PZEM_Logger.ino.bootloader.bin" \
+           "/tmp/firmware/bootloader_${SHORT_SHA}.bin"   2>/dev/null || true
+        cp "$BUILD_DIR/PZEM_Logger.ino.partitions.bin" \
+           "/tmp/firmware/partitions_${SHORT_SHA}.bin"   2>/dev/null || true
+        ls -lh /tmp/firmware/
+
+    # ── 9. Upload as GitHub Actions artifact (keeps 90 days) ─────────────────
+    - name: Upload firmware artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PZEM_Logger_firmware_${{ github.sha }}
+        path: /tmp/firmware/
+        retention-days: 90
+        if-no-files-found: error
+
+    # ── 10. On push to main: also create a versioned GitHub Release ───────────
+    - name: Create GitHub Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: build-${{ github.run_number }}
+        name: "Firmware build #${{ github.run_number }} (${{ github.sha }})"
+        body: |
+          **Automatic build** from commit `${{ github.sha }}`
+
+          ### Flash command (esptool)
+          ```bash
+          esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 460800 \
+            write_flash \
+            0x1000  bootloader_*.bin \
+            0x8000  partitions_*.bin \
+            0x10000 PZEM_Logger_*.bin
+          ```
+          Or use the **ESP32 Flash Download Tool** (Windows) and flash `PZEM_Logger_*.bin` at offset `0x10000`.
+        files: /tmp/firmware/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
