@@ -107,13 +107,146 @@ setInterval(refresh, 1000);
 )HTML";
 
 static const char PAGE_SETTINGS[] PROGMEM = R"HTML(
-<!DOCTYPE html><html lang="de"><head>
-<meta charset="UTF-8"><title>Settings</title>
-<style>body{font-family:sans-serif;max-width:600px;margin:2em auto;padding:1em}
-a{color:#007acc}</style></head><body>
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings – PZEM Logger</title>
+<style>
+  body { font-family: sans-serif; max-width: 600px; margin: 1em auto;
+         padding: 1em; background: #f5f5f5; color: #222; }
+  h1   { color: #000; }
+  .card { background: white; border-radius: 8px; padding: 1.2em;
+          margin-bottom: 1em; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h2   { margin: 0 0 1em; font-size: 1.1em; color: #444; }
+  .rate-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: .5em;
+    margin-bottom: 1em;
+  }
+  .rate-btn {
+    padding: .7em .3em;
+    font-size: .95em;
+    border: 2px solid #ccc;
+    border-radius: 6px;
+    background: white;
+    color: #333;
+    cursor: pointer;
+    text-align: center;
+    transition: border-color .15s, background .15s;
+  }
+  .rate-btn:hover  { border-color: #007acc; }
+  .rate-btn.active { border-color: #007acc; background: #e8f4ff; color: #007acc; font-weight: bold; }
+  .current { font-size: .9em; color: #666; margin-bottom: 1.2em; }
+  .current span { font-weight: bold; color: #007acc; }
+  .save-row { display: flex; gap: .6em; align-items: center; }
+  button.primary { padding: .8em 1.6em; font-size: 1em; border: none;
+                   border-radius: 6px; background: #007acc; color: white; cursor: pointer; }
+  button.primary:hover { background: #005f99; }
+  button.primary:disabled { background: #aaa; cursor: default; }
+  .msg { font-size: .9em; padding: .4em .8em; border-radius: 4px; display: none; }
+  .msg.ok  { background: #cfc; color: #060; display: inline-block; }
+  .msg.err { background: #fcc; color: #800; display: inline-block; }
+  a.back   { display: inline-block; margin-top: .5em; color: #007acc; text-decoration: none; }
+  a.back:hover { text-decoration: underline; }
+  .note { font-size: .85em; color: #888; margin-top: .5em; }
+</style>
+</head><body>
+
 <h1>Settings</h1>
-<p>Diese Seite ist noch nicht implementiert.</p>
-<p><a href="/">← Zurück</a></p>
+
+<div class="card">
+  <h2>Sampling Rate</h2>
+  <p class="current">Current rate: <span id="cur-rate">…</span></p>
+
+  <div class="rate-grid" id="rate-grid">
+    <div class="rate-btn" data-ms="200"  >5 / s</div>
+    <div class="rate-btn" data-ms="500"  >2 / s</div>
+    <div class="rate-btn" data-ms="1000" >1 / s</div>
+    <div class="rate-btn" data-ms="2000" >0.5 / s</div>
+    <div class="rate-btn" data-ms="5000" >0.2 / s</div>
+    <div class="rate-btn" data-ms="10000">1 / 10 s</div>
+    <div class="rate-btn" data-ms="30000">1 / 30 s</div>
+  </div>
+
+  <div class="save-row">
+    <button class="primary" id="save-btn" onclick="saveSettings()" disabled>Apply</button>
+    <span class="msg" id="msg"></span>
+  </div>
+  <p class="note">Changes take effect immediately and are kept until the device is restarted.</p>
+</div>
+
+<a class="back" href="/">← Back</a>
+
+<script>
+let selectedMs = null;
+
+// Load current settings
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    showCurrentRate(d.poll_ms);
+    highlightActive(d.poll_ms);
+  } catch(e) {
+    document.getElementById('cur-rate').textContent = 'unknown';
+  }
+}
+
+function msToLabel(ms) {
+  const map = {200:'5 / s', 500:'2 / s', 1000:'1 / s',
+               2000:'0.5 / s', 5000:'0.2 / s', 10000:'1 / 10 s', 30000:'1 / 30 s'};
+  return map[ms] || (ms + ' ms');
+}
+
+function showCurrentRate(ms) {
+  document.getElementById('cur-rate').textContent = msToLabel(ms);
+}
+
+function highlightActive(ms) {
+  document.querySelectorAll('.rate-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.ms) === ms);
+  });
+}
+
+// Button clicks
+document.getElementById('rate-grid').addEventListener('click', e => {
+  const btn = e.target.closest('.rate-btn');
+  if (!btn) return;
+  selectedMs = parseInt(btn.dataset.ms);
+  document.querySelectorAll('.rate-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('save-btn').disabled = false;
+  setMsg('', '');
+});
+
+async function saveSettings() {
+  if (selectedMs === null) return;
+  document.getElementById('save-btn').disabled = true;
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'poll_ms=' + selectedMs
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    showCurrentRate(d.poll_ms);
+    setMsg('Saved!', 'ok');
+  } catch(e) {
+    setMsg('Error: ' + e.message, 'err');
+    document.getElementById('save-btn').disabled = false;
+  }
+}
+
+function setMsg(text, cls) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'msg ' + cls;
+}
+
+loadSettings();
+</script>
 </body></html>
 )HTML";
 
@@ -177,14 +310,16 @@ bool WebPortal::begin() {
   // Firefox
   _server.on("/canonical.html",            HTTP_GET, [this](){ handleCaptivePortal(); });
 
-  // ── Normale Routen (unverändert) ──
-  _server.on("/",         HTTP_GET,  [this](){ handleRoot(); });
-  _server.on("/api/live", HTTP_GET,  [this](){ handleApiLive(); });
-  _server.on("/download", HTTP_GET,  [this](){ handleDownload(); });
-  _server.on("/reset",    HTTP_POST, [this](){ handleReset(); });
-  _server.on("/settings", HTTP_GET,  [this](){ handleSettings(); });
-  _server.on("/readme",   HTTP_GET,  [this](){ handleReadme(); });
-  _server.onNotFound(                [this](){ handleNotFound(); });
+  // ── Normale Routen ──
+  _server.on("/",              HTTP_GET,  [this](){ handleRoot(); });
+  _server.on("/api/live",      HTTP_GET,  [this](){ handleApiLive(); });
+  _server.on("/api/settings",  HTTP_GET,  [this](){ handleApiSettings(); });
+  _server.on("/api/settings",  HTTP_POST, [this](){ handleApiSettingsSave(); });
+  _server.on("/download",      HTTP_GET,  [this](){ handleDownload(); });
+  _server.on("/reset",         HTTP_POST, [this](){ handleReset(); });
+  _server.on("/settings",      HTTP_GET,  [this](){ handleSettings(); });
+  _server.on("/readme",        HTTP_GET,  [this](){ handleReadme(); });
+  _server.onNotFound(                     [this](){ handleNotFound(); });
 
   _server.begin();
   return true;
@@ -263,6 +398,38 @@ void WebPortal::handleReset() {
 
 void WebPortal::handleSettings() {
   _server.send_P(200, "text/html", PAGE_SETTINGS);
+}
+
+// GET /api/settings — returns current settings as JSON
+void WebPortal::handleApiSettings() {
+  char buf[64];
+  snprintf(buf, sizeof(buf),
+           "{\"poll_ms\":%lu}",
+           (unsigned long)_logger.getPollInterval());
+  _server.send(200, "application/json", buf);
+}
+
+// POST /api/settings — body: poll_ms=<value>
+void WebPortal::handleApiSettingsSave() {
+  if (_server.hasArg("poll_ms")) {
+    uint32_t ms = (uint32_t)_server.arg("poll_ms").toInt();
+    // Clamp to allowed set: 200 500 1000 2000 5000 10000 30000
+    const uint32_t allowed[] = {200, 500, 1000, 2000, 5000, 10000, 30000};
+    bool valid = false;
+    for (auto v : allowed) { if (ms == v) { valid = true; break; } }
+    if (valid) {
+      _logger.setPollInterval(ms);
+      Serial.printf("[Web] Poll-Intervall gesetzt: %lu ms\n", (unsigned long)ms);
+    } else {
+      _server.send(400, "application/json", "{\"error\":\"invalid poll_ms\"}");
+      return;
+    }
+  }
+  char buf[64];
+  snprintf(buf, sizeof(buf),
+           "{\"poll_ms\":%lu}",
+           (unsigned long)_logger.getPollInterval());
+  _server.send(200, "application/json", buf);
 }
 
 void WebPortal::handleReadme() {
