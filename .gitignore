@@ -1,0 +1,17 @@
+# Arduino build artefacts
+build/
+*.bin
+*.elf
+*.map
+
+# Arduino-CLI local config
+arduino-cli.yaml
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# VSCode
+.vscode/
