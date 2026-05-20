@@ -1,11 +1,12 @@
 /*
- * WebPortal.h v4
+ * WebPortal.h v5
  * --------------
- * Verbesserungen:
+ * Änderungen gegenüber v4:
  *  - Statisch allokierter Char-Buffer für API-JSON (kein Heap-Stress)
  *  - PROGMEM HTML wird ohne String-Kopie gesendet (send_P)
- *  - Konstante HTML-Strings ohne Replace (jede Seite hat ihren Buffer)
  *  - Fehler-Pfade konsistent als 4xx/5xx
+ *  - Settings-Seite: Poll-Rate per POST /api/settings speicherbar
+ *  - /api/settings GET liefert aktuelle Einstellungen als JSON
  */
 #ifndef WEB_PORTAL_H
 #define WEB_PORTAL_H
@@ -13,8 +14,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <DNSServer.h>        // ← NEU
-#include <ESPmDNS.h>          // ← NEU
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 #include "Config.h"
 #include "Logger.h"
 
@@ -27,16 +28,18 @@ public:
 private:
   Logger&   _logger;
   WebServer _server;
-  DNSServer _dns;             // ← NEU
+  DNSServer _dns;
 
   // Handler
   void handleRoot();
   void handleApiLive();
+  void handleApiSettings();     // GET  /api/settings
+  void handleApiSettingsSave(); // POST /api/settings
   void handleDownload();
   void handleReset();
   void handleSettings();
   void handleReadme();
-  void handleCaptivePortal(); // ← NEU
+  void handleCaptivePortal();
   void handleNotFound();
 };
 
