@@ -1,6 +1,6 @@
 /*
  * WebPortal.cpp v5 - heap-effizient + Captive Portal
- * Updated with Power Threshold Setting Controls and Native Live Plotting Scope
+ * Updated with Power Threshold Setting Controls and Scaled Live Plotting Scope
  */
 #include "WebPortal.h"
 
@@ -278,7 +278,6 @@ loadSettings();
 </body></html>
 )HTML";
 
-// --- NEW LIVE PLOT PAGE IN PROGMEM ---
 static const char PAGE_LIVEPLOT[] PROGMEM = R"HTML(
 <!DOCTYPE html><html lang="de"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -302,12 +301,12 @@ static const char PAGE_LIVEPLOT[] PROGMEM = R"HTML(
   <div class="metrics-row">
     <div>Aktuell: <span id="val-w">—</span> W</div>
     <div>Spannung: <span id="val-v">—</span> V</div>
-    <div>Skalenendwert: <span id="val-max">—</span> W</div>
+    <div>Maximalwert: <span id="val-max">—</span> W</div>
   </div>
   <div class="canvas-container">
     <canvas id="scopeCanvas" width="600" height="280"></canvas>
   </div>
-  <div class="legend">Zeigt die letzten 60 Datenpunkte an — Automatische Skalierung</div>
+  <div class="legend">Timeline-Profil — Automatische Skalierung der Ordinate</div>
 </div>
 
 <a class="back" href="/">← Zurück</a>
@@ -325,7 +324,6 @@ async function initScope() {
     const r = await fetch('/api/settings');
     const d = await r.json();
     if(d.poll_ms) {
-      // Don't flood too heavily if 200ms, keep baseline clean
       fetchIntervalMs = Math.max(d.poll_ms, 200);
     }
   } catch(e) {
@@ -363,36 +361,75 @@ function renderChart() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (powerData.length === 0) return;
 
-  // Determine dynamic Max Y to autoscale nicely for active kitchen loads (blenders vs heaters)
+  // Calculate scaling ceiling
   let maximumObserved = Math.max(...powerData, 10);
-  // Round up to nearest nice interval step for neat display limits
   let scaleYMax = Math.ceil(maximumObserved * 1.15 / 10) * 10;
   document.getElementById('val-max').textContent = scaleYMax;
 
-  // 1. Draw Background Grid Lines
-  ctx.strokeStyle = '#22222a';
+  // Scope Bounds Padding definitions
+  const paddingLeft = 55;
+  const paddingBottom = 25;
+  const paddingTop = 15;
+  const paddingRight = 15;
+  const graphWidth = canvas.width - paddingLeft - paddingRight;
+  const graphHeight = canvas.height - paddingTop - paddingBottom;
+
+  // Draw Main Grid Outline Area
+  ctx.strokeStyle = '#33333f';
   ctx.lineWidth = 1;
+  ctx.strokeRect(paddingLeft, paddingTop, graphWidth, graphHeight);
+
+  // Set standard text metrics
+  ctx.font = '11px monospace';
+  ctx.fillStyle = '#8e8e93';
+
+  // 1. Draw Horizontal Grid Lines & Y-Axis Labels
+  ctx.strokeStyle = '#22222a';
   const horizontalGridDivisions = 4;
-  for (let i = 1; i < horizontalGridDivisions; i++) {
-    let horizontalYPosition = (canvas.height / horizontalGridDivisions) * i;
-    ctx.beginPath();
-    ctx.moveTo(0, horizontalYPosition);
-    ctx.lineTo(canvas.width, horizontalYPosition);
-    ctx.stroke();
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i <= horizontalGridDivisions; i++) {
+    let pct = i / horizontalGridDivisions;
+    let yPos = paddingTop + graphHeight * pct;
+    
+    // Draw horizontal split lines inside bounding box
+    if (i > 0 && i < horizontalGridDivisions) {
+      ctx.beginPath();
+      ctx.moveTo(paddingLeft, yPos);
+      ctx.lineTo(canvas.width - paddingRight, yPos);
+      ctx.stroke();
+    }
+
+    // Print active power metric step next to horizontal grid
+    let yVal = Math.round(scaleYMax * (1 - pct));
+    ctx.fillText(yVal + 'W', paddingLeft - 8, yPos);
   }
 
-  // 2. Draw Plot Line
-  ctx.strokeStyle = '#28a745'; // Matching beautiful clean active green color scheme
-  ctx.lineWidth = 3;
+  // 2. Draw X-Axis Timeline Labels
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  let totalTimeSec = Math.round(((maxDataPoints - 1) * fetchIntervalMs) / 1000);
+  
+  // Left Tick (Oldest Data entry boundary)
+  ctx.fillText('-' + totalTimeSec + 's', paddingLeft, paddingTop + graphHeight + 6);
+  // Center Tick (Midpoint reference)
+  ctx.fillText('-' + Math.round(totalTimeSec / 2) + 's', paddingLeft + graphWidth / 2, paddingTop + graphHeight + 6);
+  // Right Tick (Current real-time capture)
+  ctx.fillStyle = '#28a745';
+  ctx.fillText('Jetzt', canvas.width - paddingRight, paddingTop + graphHeight + 6);
+  ctx.fillStyle = '#8e8e93'; // revert color
+
+  // 3. Draw Telemetry Signal Path
+  ctx.strokeStyle = '#28a745';
+  ctx.lineWidth = 2.5;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.beginPath();
 
   for (let idx = 0; idx < powerData.length; idx++) {
-    // Distribute spacing perfectly horizontally across viewport coordinates
-    const coordinateX = (canvas.width / (maxDataPoints - 1)) * idx;
-    // Standard canvas inverted Y inversion coordinate correction
-    const coordinateY = canvas.height - (powerData[idx] / scaleYMax) * canvas.height;
+    const coordinateX = paddingLeft + (graphWidth / (maxDataPoints - 1)) * idx;
+    const coordinateY = paddingTop + graphHeight - (powerData[idx] / scaleYMax) * graphHeight;
     
     if (idx === 0) {
       ctx.moveTo(coordinateX, coordinateY);
@@ -402,12 +439,13 @@ function renderChart() {
   }
   ctx.stroke();
 
-  // 3. Fill Area Under Curve smoothly
-  if(powerData.length > 1) {
-    ctx.lineTo((canvas.width / (maxDataPoints - 1)) * (powerData.length - 1), canvas.height);
-    ctx.lineTo(0, canvas.height);
+  // 4. Paint Fill Layer underneath path
+  if (powerData.length > 1) {
+    let lastX = paddingLeft + (graphWidth / (maxDataPoints - 1)) * (powerData.length - 1);
+    ctx.lineTo(lastX, paddingTop + graphHeight);
+    ctx.lineTo(paddingLeft, paddingTop + graphHeight);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(40, 167, 69, 0.08)';
+    ctx.fillStyle = 'rgba(40, 167, 69, 0.06)';
     ctx.fill();
   }
 }
@@ -482,7 +520,7 @@ bool WebPortal::begin() {
   _server.on("/reset",         HTTP_POST, [this](){ handleReset(); });
   _server.on("/settings",      HTTP_GET,  [this](){ handleSettings(); });
   _server.on("/readme",        HTTP_GET,  [this](){ handleReadme(); });
-  _server.on("/liveplot",      HTTP_GET,  [this](){ handleLivePlot(); }); // <-- REGISTER NEW SCOPE ROUTE
+  _server.on("/liveplot",      HTTP_GET,  [this](){ handleLivePlot(); });
   _server.onNotFound(                     [this](){ handleNotFound(); });
 
   _server.begin();
@@ -563,7 +601,6 @@ void WebPortal::handleSettings() {
   _server.send_P(200, "text/html", PAGE_SETTINGS);
 }
 
-// NEW HANDLER FOR LIVE PLOT ROUTE
 void WebPortal::handleLivePlot() {
   _server.send_P(200, "text/html", PAGE_LIVEPLOT);
 }
