@@ -464,7 +464,7 @@ a{color:#007acc}</style></head><body>
 <p><strong>Functions:</strong></p>
 <ul>
   <li>logs time, voltage, power, cos phi</li>
-  <li>adjustable poll, and log frequency</li>
+  <li>adjustable poll/sampling frequency</li>
   <li>adjustable power threshold for start of log</li>
   <li>polls per default every 0.5 s</li>
   <li>logs values per default every 10 s to SD memory card</li>
