@@ -31,7 +31,8 @@ public:
       _lastPower(NAN),
       _lastPf(NAN),
       _pzemErrorCount(0),
-      _sdOk(false)
+      _sdOk(false),
+      _pollIntervalMs(INTERVAL_PZEM_POLL_MS_DEFAULT)
   {}
 
   bool begin() {
@@ -42,9 +43,13 @@ public:
     return _sdOk;
   }
 
+  // Set poll interval at runtime (called from WebPortal settings handler)
+  void setPollInterval(uint32_t ms) { if (ms > 0) _pollIntervalMs = ms; }
+  uint32_t getPollInterval() const  { return _pollIntervalMs; }
+
   void pollIfDue() {
     uint32_t now = millis();
-    if (now - _lastPollMs < INTERVAL_PZEM_POLL_MS) return;
+    if (now - _lastPollMs < _pollIntervalMs) return;
     _lastPollMs = now;
 
     float V = _pzem.voltage();
@@ -152,6 +157,7 @@ private:
   float       _lastPf;
   uint8_t     _pzemErrorCount;
   bool        _sdOk;
+  uint32_t    _pollIntervalMs;   // runtime-adjustable, default 500 ms
 
   void pushSample(const Sample& s) {
     if (_bufferCount < RAM_BUFFER_SIZE) {
