@@ -1,5 +1,5 @@
 /*
- * Config.h - Zentrale Konfiguration v4
+ * Config.h - Zentrale Konfiguration v4 test
  */
 #ifndef CONFIG_H
 #define CONFIG_H
