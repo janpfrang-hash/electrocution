@@ -2,11 +2,12 @@
  * WebPortal.h v5
  * --------------
  * Änderungen gegenüber v4:
- *  - Statisch allokierter Char-Buffer für API-JSON (kein Heap-Stress)
- *  - PROGMEM HTML wird ohne String-Kopie gesendet (send_P)
- *  - Fehler-Pfade konsistent als 4xx/5xx
- *  - Settings-Seite: Poll-Rate per POST /api/settings speicherbar
- *  - /api/settings GET liefert aktuelle Einstellungen als JSON
+ * - Statisch allokierter Char-Buffer für API-JSON (kein Heap-Stress)
+ * - PROGMEM HTML wird ohne String-Kopie gesendet (send_P)
+ * - Fehler-Pfade konsistent als 4xx/5xx
+ * - Settings-Seite: Poll-Rate per POST /api/settings speicherbar
+ * - /api/settings GET liefert aktuelle Einstellungen als JSON
+ * - Hinzugefügt: Route und Handler für Live Plotting
  */
 #ifndef WEB_PORTAL_H
 #define WEB_PORTAL_H
@@ -39,6 +40,7 @@ private:
   void handleReset();
   void handleSettings();
   void handleReadme();
+  void handleLivePlot();        // <-- NEW HANDLER
   void handleCaptivePortal();
   void handleNotFound();
 };
