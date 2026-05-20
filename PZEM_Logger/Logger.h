@@ -1,5 +1,5 @@
 /*
- * Logger.h v4
+ * Logger.h v4 - Updated with Power Threshold filtering
  */
 #ifndef LOGGER_H
 #define LOGGER_H
@@ -32,7 +32,8 @@ public:
       _lastPf(NAN),
       _pzemErrorCount(0),
       _sdOk(false),
-      _pollIntervalMs(INTERVAL_PZEM_POLL_MS)
+      _pollIntervalMs(INTERVAL_PZEM_POLL_MS),
+      _powerThresholdW(0.0f) // Default: 0W (No lower limit)
   {}
  
   bool begin() {
@@ -46,6 +47,10 @@ public:
   // Set poll interval at runtime (called from WebPortal settings handler)
   void setPollInterval(uint32_t ms) { if (ms > 0) _pollIntervalMs = ms; }
   uint32_t getPollInterval() const  { return _pollIntervalMs; }
+
+  // Set power threshold at runtime
+  void setPowerThreshold(float watts) { _powerThresholdW = watts; }
+  float getPowerThreshold() const     { return _powerThresholdW; }
  
   void pollIfDue() {
     uint32_t now = millis();
@@ -71,7 +76,11 @@ public:
     _lastVoltage = V;
     _lastPower = P;
     _lastPf = PF;
-    pushSample({ now, V, P, PF });
+
+    // Only log data if it meets or exceeds our engineering power threshold
+    if (P >= _powerThresholdW) {
+      pushSample({ now, V, P, PF });
+    }
   }
  
   void flushIfDue() {
@@ -158,6 +167,7 @@ private:
   uint8_t     _pzemErrorCount;
   bool        _sdOk;
   uint32_t    _pollIntervalMs;   // runtime-adjustable, default 500 ms
+  float       _powerThresholdW;  // runtime-adjustable, default 0.0 W
  
   void pushSample(const Sample& s) {
     if (_bufferCount < RAM_BUFFER_SIZE) {
