@@ -19,6 +19,9 @@ jobs:
     name: Compile for ESP32-WROOM
     runs-on: ubuntu-22.04      # pinned Ubuntu version – never changes under you
 
+    permissions:
+      contents: write
+
     steps:
 
     # ── 1. Checkout ──────────────────────────────────────────────────────────
