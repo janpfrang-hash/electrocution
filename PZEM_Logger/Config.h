@@ -34,7 +34,7 @@
 #define DNS_PORT            53
 // ===== SD-Karte =====
 #define LOG_FILE_PATH    "/log.csv"
-#define LOG_FILE_HEADER  "millis,voltage_V,power_W,pf"
+#define LOG_FILE_HEADER  "time_ms,voltage_V,power_W,cos_phi"
 
 // ===== RAM-Puffer =====
 // 64 × 8 Byte = 512 Byte. 64 Samples × 0.5 s = 32 s Reserve.
