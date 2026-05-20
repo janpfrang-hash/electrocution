@@ -53,7 +53,7 @@ jobs:
     #   ESPmDNS      – bundled in the ESP32 core
     - name: Install third-party libraries
       run: |
-        arduino-cli lib install "PZEM-004T-v30@1.1.2"
+        arduino-cli lib install "PZEM004Tv30@1.1.2"
 
     # ── 6. Sketch must live in a folder with the same name as the .ino ───────
     #   Our repo root already is PZEM_Logger/ if you name it that, but the
