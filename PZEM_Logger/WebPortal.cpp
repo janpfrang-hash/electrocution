@@ -1,6 +1,6 @@
 /*
  * WebPortal.cpp v5 - heap-effizient + Captive Portal
- * Updated with Power Threshold Setting Controls
+ * Updated with Power Threshold Setting Controls and Native Live Plotting Scope
  */
 #include "WebPortal.h"
 
@@ -21,7 +21,7 @@ static const char PAGE_INDEX[] PROGMEM = R"HTML(
   .sub-live { font-size: 1.2em; font-weight: normal; color: #444;
               text-align: center; margin-bottom: 0.5em; }
   .label { text-align: center; color: #666; font-weight: bold; }
-  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: .6em; }
+  .btn-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .6em; }
   button { padding: .9em; font-size: 1em; border: none; border-radius: 6px;
            background: #007acc; color: white; cursor: pointer; }
   button:hover { background: #005f99; }
@@ -54,8 +54,9 @@ static const char PAGE_INDEX[] PROGMEM = R"HTML(
 
 <div class="card">
   <div class="btn-row">
+    <button onclick="location.href='/liveplot'" style="background: #28a745;">📈 Live Plot</button>
     <button onclick="location.href='/download'">Download Log Files</button>
-    <button class="danger" onclick="confirmReset()">Reset and Delete SD Card</button>
+    <button class="danger" onclick="confirmReset()">Reset & Delete SD</button>
     <button class="muted" onclick="location.href='/settings'">Settings</button>
     <button class="muted" onclick="location.href='/readme'">Read Me</button>
   </div>
@@ -277,6 +278,145 @@ loadSettings();
 </body></html>
 )HTML";
 
+// --- NEW LIVE PLOT PAGE IN PROGMEM ---
+static const char PAGE_LIVEPLOT[] PROGMEM = R"HTML(
+<!DOCTYPE html><html lang="de"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Scope – PZEM Logger</title>
+<style>
+  body { font-family: sans-serif; max-width: 650px; margin: 1em auto; padding: 1em; background: #f5f5f5; color: #222; }
+  h1 { color: #000; margin-bottom: 0.5em; }
+  .card { background: white; border-radius: 8px; padding: 1.2em; margin-bottom: 1em; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .metrics-row { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 0.8em; font-size: 1.1em; color: #007acc; }
+  .canvas-container { width: 100%; position: relative; }
+  canvas { background: #111116; border-radius: 6px; width: 100%; display: block; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
+  a.back { display: inline-block; margin-top: .5em; color: #007acc; text-decoration: none; font-weight: bold; }
+  a.back:hover { text-decoration: underline; }
+  .legend { font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center; }
+</style>
+</head><body>
+
+<h1>Echtzeit Leistungsprofil</h1>
+
+<div class="card">
+  <div class="metrics-row">
+    <div>Aktuell: <span id="val-w">—</span> W</div>
+    <div>Spannung: <span id="val-v">—</span> V</div>
+    <div>Skalenendwert: <span id="val-max">—</span> W</div>
+  </div>
+  <div class="canvas-container">
+    <canvas id="scopeCanvas" width="600" height="280"></canvas>
+  </div>
+  <div class="legend">Zeigt die letzten 60 Datenpunkte an — Automatische Skalierung</div>
+</div>
+
+<a class="back" href="/">← Zurück</a>
+
+<script>
+const canvas = document.getElementById('scopeCanvas');
+const ctx = canvas.getContext('2d');
+const powerData = [];
+const maxDataPoints = 60;
+let fetchIntervalMs = 500; // default safe fallback
+
+async function initScope() {
+  try {
+    // Read exact device sample configuration to synchronize polling cadence
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    if(d.poll_ms) {
+      // Don't flood too heavily if 200ms, keep baseline clean
+      fetchIntervalMs = Math.max(d.poll_ms, 200);
+    }
+  } catch(e) {
+    console.error("Could not sync polling rate", e);
+  }
+  startScopeLoop();
+}
+
+function startScopeLoop() {
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/live');
+      if (!r.ok) return;
+      const d = await r.json();
+      
+      const currentPower = (d.power === null) ? 0.0 : d.power;
+      const currentVoltage = (d.voltage === null) ? 0.0 : d.voltage;
+      
+      document.getElementById('val-w').textContent = currentPower.toFixed(1);
+      document.getElementById('val-v').textContent = Math.round(currentVoltage);
+      
+      powerData.push(currentPower);
+      if (powerData.length > maxDataPoints) {
+        powerData.shift();
+      }
+      
+      renderChart();
+    } catch(e) {
+      document.getElementById('val-w').textContent = "—";
+    }
+  }, fetchIntervalMs);
+}
+
+function renderChart() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (powerData.length === 0) return;
+
+  // Determine dynamic Max Y to autoscale nicely for active kitchen loads (blenders vs heaters)
+  let maximumObserved = Math.max(...powerData, 10);
+  // Round up to nearest nice interval step for neat display limits
+  let scaleYMax = Math.ceil(maximumObserved * 1.15 / 10) * 10;
+  document.getElementById('val-max').textContent = scaleYMax;
+
+  // 1. Draw Background Grid Lines
+  ctx.strokeStyle = '#22222a';
+  ctx.lineWidth = 1;
+  const horizontalGridDivisions = 4;
+  for (let i = 1; i < horizontalGridDivisions; i++) {
+    let horizontalYPosition = (canvas.height / horizontalGridDivisions) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, horizontalYPosition);
+    ctx.lineTo(canvas.width, horizontalYPosition);
+    ctx.stroke();
+  }
+
+  // 2. Draw Plot Line
+  ctx.strokeStyle = '#28a745'; // Matching beautiful clean active green color scheme
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+
+  for (let idx = 0; idx < powerData.length; idx++) {
+    // Distribute spacing perfectly horizontally across viewport coordinates
+    const coordinateX = (canvas.width / (maxDataPoints - 1)) * idx;
+    // Standard canvas inverted Y inversion coordinate correction
+    const coordinateY = canvas.height - (powerData[idx] / scaleYMax) * canvas.height;
+    
+    if (idx === 0) {
+      ctx.moveTo(coordinateX, coordinateY);
+    } else {
+      ctx.lineTo(coordinateX, coordinateY);
+    }
+  }
+  ctx.stroke();
+
+  // 3. Fill Area Under Curve smoothly
+  if(powerData.length > 1) {
+    ctx.lineTo((canvas.width / (maxDataPoints - 1)) * (powerData.length - 1), canvas.height);
+    ctx.lineTo(0, canvas.height);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(40, 167, 69, 0.08)';
+    ctx.fill();
+  }
+}
+
+initScope();
+</script>
+</body></html>
+)HTML";
+
 static const char PAGE_README[] PROGMEM = R"HTML(
 <!DOCTYPE html><html lang="de"><head>
 <meta charset="UTF-8"><title>Read Me</title>
@@ -342,6 +482,7 @@ bool WebPortal::begin() {
   _server.on("/reset",         HTTP_POST, [this](){ handleReset(); });
   _server.on("/settings",      HTTP_GET,  [this](){ handleSettings(); });
   _server.on("/readme",        HTTP_GET,  [this](){ handleReadme(); });
+  _server.on("/liveplot",      HTTP_GET,  [this](){ handleLivePlot(); }); // <-- REGISTER NEW SCOPE ROUTE
   _server.onNotFound(                     [this](){ handleNotFound(); });
 
   _server.begin();
@@ -420,6 +561,11 @@ void WebPortal::handleReset() {
 
 void WebPortal::handleSettings() {
   _server.send_P(200, "text/html", PAGE_SETTINGS);
+}
+
+// NEW HANDLER FOR LIVE PLOT ROUTE
+void WebPortal::handleLivePlot() {
+  _server.send_P(200, "text/html", PAGE_LIVEPLOT);
 }
 
 // GET /api/settings — returns current settings as JSON
