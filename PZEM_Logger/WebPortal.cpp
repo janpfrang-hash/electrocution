@@ -1,12 +1,6 @@
 /*
  * WebPortal.cpp v5 - heap-effizient + Captive Portal
- *
- * Änderungen gegenüber v4:
- *  - DNSServer catch-all: alle DNS-Anfragen → 192.168.4.1
- *  - mDNS: erreichbar unter http://braun_PZEM.local
- *  - Captive-Portal-Probes aller gängigen OS abgefangen (Android, Apple, Windows, Firefox)
- *  - handleCaptivePortal() leitet per 302 auf Root weiter
- *  - update() ruft _dns.processNextRequest() auf
+ * Updated with Power Threshold Setting Controls
  */
 #include "WebPortal.h"
 
@@ -118,13 +112,13 @@ static const char PAGE_SETTINGS[] PROGMEM = R"HTML(
   .card { background: white; border-radius: 8px; padding: 1.2em;
           margin-bottom: 1em; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
   h2   { margin: 0 0 1em; font-size: 1.1em; color: #444; }
-  .rate-grid {
+  .grid-container {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: .5em;
     margin-bottom: 1em;
   }
-  .rate-btn {
+  .setting-btn {
     padding: .7em .3em;
     font-size: .95em;
     border: 2px solid #ccc;
@@ -135,11 +129,11 @@ static const char PAGE_SETTINGS[] PROGMEM = R"HTML(
     text-align: center;
     transition: border-color .15s, background .15s;
   }
-  .rate-btn:hover  { border-color: #007acc; }
-  .rate-btn.active { border-color: #007acc; background: #e8f4ff; color: #007acc; font-weight: bold; }
+  .setting-btn:hover  { border-color: #007acc; }
+  .setting-btn.active { border-color: #007acc; background: #e8f4ff; color: #007acc; font-weight: bold; }
   .current { font-size: .9em; color: #666; margin-bottom: 1.2em; }
   .current span { font-weight: bold; color: #007acc; }
-  .save-row { display: flex; gap: .6em; align-items: center; }
+  .save-row { display: flex; gap: .6em; align-items: center; margin-top: 1.5em; }
   button.primary { padding: .8em 1.6em; font-size: 1em; border: none;
                    border-radius: 6px; background: #007acc; color: white; cursor: pointer; }
   button.primary:hover { background: #005f99; }
@@ -159,18 +153,33 @@ static const char PAGE_SETTINGS[] PROGMEM = R"HTML(
   <h2>Sampling Rate</h2>
   <p class="current">Current rate: <span id="cur-rate">…</span></p>
 
-  <div class="rate-grid" id="rate-grid">
-    <div class="rate-btn" data-ms="200"  >5 / s</div>
-    <div class="rate-btn" data-ms="500"  >2 / s</div>
-    <div class="rate-btn" data-ms="1000" >1 / s</div>
-    <div class="rate-btn" data-ms="2000" >0.5 / s</div>
-    <div class="rate-btn" data-ms="5000" >0.2 / s</div>
-    <div class="rate-btn" data-ms="10000">1 / 10 s</div>
-    <div class="rate-btn" data-ms="30000">1 / 30 s</div>
+  <div class="grid-container" id="rate-grid">
+    <div class="setting-btn rate-btn" data-ms="200"  >5 / s</div>
+    <div class="setting-btn rate-btn" data-ms="500"  >2 / s</div>
+    <div class="setting-btn rate-btn" data-ms="1000" >1 / s</div>
+    <div class="setting-btn rate-btn" data-ms="2000" >0.5 / s</div>
+    <div class="setting-btn rate-btn" data-ms="5000" >0.2 / s</div>
+    <div class="setting-btn rate-btn" data-ms="10000">1 / 10 s</div>
+    <div class="setting-btn rate-btn" data-ms="30000">1 / 30 s</div>
+  </div>
+
+  <hr style="border: 0; border-top: 1px solid #eee; margin: 1.5em 0;">
+
+  <h2>Logging Power Threshold</h2>
+  <p class="current">Log data if power exceeds: <span id="cur-thresh">…</span></p>
+
+  <div class="grid-container" id="thresh-grid">
+    <div class="setting-btn thresh-btn" data-w="0">0 W (No Limit)</div>
+    <div class="setting-btn thresh-btn" data-w="1">1 W</div>
+    <div class="setting-btn thresh-btn" data-w="2">2 W</div>
+    <div class="setting-btn thresh-btn" data-w="5">5 W</div>
+    <div class="setting-btn thresh-btn" data-w="10">10 W</div>
+    <div class="setting-btn thresh-btn" data-w="20">20 W</div>
+    <div class="setting-btn thresh-btn" data-w="50">50 W</div>
   </div>
 
   <div class="save-row">
-    <button class="primary" id="save-btn" onclick="saveSettings()" disabled>Apply</button>
+    <button class="primary" id="save-btn" onclick="saveSettings()" disabled>Apply Settings</button>
     <span class="msg" id="msg"></span>
   </div>
   <p class="note">Changes take effect immediately and are kept until the device is restarted.</p>
@@ -180,16 +189,19 @@ static const char PAGE_SETTINGS[] PROGMEM = R"HTML(
 
 <script>
 let selectedMs = null;
+let selectedThresh = null;
 
-// Load current settings
+// Load current settings from the ESP32
 async function loadSettings() {
   try {
     const r = await fetch('/api/settings');
     const d = await r.json();
-    showCurrentRate(d.poll_ms);
-    highlightActive(d.poll_ms);
+    selectedMs = d.poll_ms;
+    selectedThresh = d.power_threshold;
+    updateUI();
   } catch(e) {
     document.getElementById('cur-rate').textContent = 'unknown';
+    document.getElementById('cur-thresh').textContent = 'unknown';
   }
 }
 
@@ -199,39 +211,54 @@ function msToLabel(ms) {
   return map[ms] || (ms + ' ms');
 }
 
-function showCurrentRate(ms) {
-  document.getElementById('cur-rate').textContent = msToLabel(ms);
-}
+function updateUI() {
+  // Update human readable current values
+  document.getElementById('cur-rate').textContent = msToLabel(selectedMs);
+  document.getElementById('cur-thresh').textContent = selectedThresh === 0 ? '0 W (No Limit)' : selectedThresh + ' W';
 
-function highlightActive(ms) {
+  // Toggle active styling on buttons
   document.querySelectorAll('.rate-btn').forEach(b => {
-    b.classList.toggle('active', parseInt(b.dataset.ms) === ms);
+    b.classList.toggle('active', parseInt(b.dataset.ms) === selectedMs);
+  });
+  document.querySelectorAll('.thresh-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.w) === selectedThresh);
   });
 }
 
-// Button clicks
+// Handle Rate Clicks
 document.getElementById('rate-grid').addEventListener('click', e => {
   const btn = e.target.closest('.rate-btn');
   if (!btn) return;
   selectedMs = parseInt(btn.dataset.ms);
-  document.querySelectorAll('.rate-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  updateUI();
+  document.getElementById('save-btn').disabled = false;
+  setMsg('', '');
+});
+
+// Handle Threshold Clicks
+document.getElementById('thresh-grid').addEventListener('click', e => {
+  const btn = e.target.closest('.thresh-btn');
+  if (!btn) return;
+  selectedThresh = parseInt(btn.dataset.w);
+  updateUI();
   document.getElementById('save-btn').disabled = false;
   setMsg('', '');
 });
 
 async function saveSettings() {
-  if (selectedMs === null) return;
+  if (selectedMs === null || selectedThresh === null) return;
   document.getElementById('save-btn').disabled = true;
   try {
     const r = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'poll_ms=' + selectedMs
+      body: 'poll_ms=' + selectedMs + '&power_threshold=' + selectedThresh
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
-    showCurrentRate(d.poll_ms);
+    selectedMs = d.poll_ms;
+    selectedThresh = d.power_threshold;
+    updateUI();
     setMsg('Saved!', 'ok');
   } catch(e) {
     setMsg('Error: ' + e.message, 'err');
@@ -286,28 +313,24 @@ bool WebPortal::begin() {
   Serial.printf("[Web] AP '%s' aktiv, IP: %s\n",
                 WIFI_AP_SSID, ip.toString().c_str());
 
-  // ── Captive Portal: DNS catch-all → alle Domains zeigen auf uns ──
+  // ── Captive Portal: DNS catch-all ──
   _dns.start(DNS_PORT, "*", ip);
   Serial.println("[Web] DNS-Server gestartet (catch-all)");
 
-  // ── mDNS: http://braun_PZEM.local als Friendly-Name ──
+  // ── mDNS: Friendly-Name ──
   if (MDNS.begin(WIFI_AP_HOSTNAME)) {
     MDNS.addService("http", "tcp", HTTP_PORT);
     Serial.printf("[Web] mDNS aktiv: http://%s.local\n", WIFI_AP_HOSTNAME);
   }
 
-  // ── Captive-Portal-Probes der Betriebssysteme abfangen ──
-  // Android
+  // ── Captive-Portal-Probes abfangen ──
   _server.on("/generate_204",              HTTP_GET, [this](){ handleCaptivePortal(); });
   _server.on("/gen_204",                   HTTP_GET, [this](){ handleCaptivePortal(); });
-  // Apple (iOS / macOS)
   _server.on("/hotspot-detect.html",       HTTP_GET, [this](){ handleCaptivePortal(); });
   _server.on("/library/test/success.html", HTTP_GET, [this](){ handleCaptivePortal(); });
-  // Windows
   _server.on("/ncsi.txt",                  HTTP_GET, [this](){ handleCaptivePortal(); });
   _server.on("/connecttest.txt",           HTTP_GET, [this](){ handleCaptivePortal(); });
   _server.on("/redirect",                  HTTP_GET, [this](){ handleCaptivePortal(); });
-  // Firefox
   _server.on("/canonical.html",            HTTP_GET, [this](){ handleCaptivePortal(); });
 
   // ── Normale Routen ──
@@ -326,7 +349,7 @@ bool WebPortal::begin() {
 }
 
 void WebPortal::update() {
-  _dns.processNextRequest();   // DNS-Anfragen beantworten (Captive Portal)
+  _dns.processNextRequest();
   _server.handleClient();
 }
 
@@ -336,7 +359,6 @@ void WebPortal::handleRoot() {
   _server.send_P(200, "text/html", PAGE_INDEX);
 }
 
-// Captive-Portal-Redirect: OS erkennt fehlende Internetverbindung und öffnet Browser
 void WebPortal::handleCaptivePortal() {
   _server.sendHeader("Location", "http://192.168.4.1/", true);
   _server.send(302, "text/plain", "");
@@ -402,21 +424,22 @@ void WebPortal::handleSettings() {
 
 // GET /api/settings — returns current settings as JSON
 void WebPortal::handleApiSettings() {
-  char buf[64];
+  char buf[128]; // Increased buffer size slightly to cleanly fit both JSON fields
   snprintf(buf, sizeof(buf),
-           "{\"poll_ms\":%lu}",
-           (unsigned long)_logger.getPollInterval());
+           "{\"poll_ms\":%lu,\"power_threshold\":%d}",
+           (unsigned long)_logger.getPollInterval(),
+           (int)_logger.getPowerThreshold());
   _server.send(200, "application/json", buf);
 }
 
-// POST /api/settings — body: poll_ms=<value>
+// POST /api/settings — body parameters parsed dynamically
 void WebPortal::handleApiSettingsSave() {
+  // 1. Evaluate Poll Timing Argument
   if (_server.hasArg("poll_ms")) {
     uint32_t ms = (uint32_t)_server.arg("poll_ms").toInt();
-    // Clamp to allowed set: 200 500 1000 2000 5000 10000 30000
-    const uint32_t allowed[] = {200, 500, 1000, 2000, 5000, 10000, 30000};
+    const uint32_t allowed_ms[] = {200, 500, 1000, 2000, 5000, 10000, 30000};
     bool valid = false;
-    for (auto v : allowed) { if (ms == v) { valid = true; break; } }
+    for (auto v : allowed_ms) { if (ms == v) { valid = true; break; } }
     if (valid) {
       _logger.setPollInterval(ms);
       Serial.printf("[Web] Poll-Intervall gesetzt: %lu ms\n", (unsigned long)ms);
@@ -425,11 +448,24 @@ void WebPortal::handleApiSettingsSave() {
       return;
     }
   }
-  char buf[64];
-  snprintf(buf, sizeof(buf),
-           "{\"poll_ms\":%lu}",
-           (unsigned long)_logger.getPollInterval());
-  _server.send(200, "application/json", buf);
+
+  // 2. Evaluate Power Threshold Configuration
+  if (_server.hasArg("power_threshold")) {
+    int thresh = _server.arg("power_threshold").toInt();
+    const int allowed_w[] = {0, 1, 2, 5, 10, 20, 50};
+    bool valid = false;
+    for (auto v : allowed_w) { if (thresh == v) { valid = true; break; } }
+    if (valid) {
+      _logger.setPowerThreshold((float)thresh);
+      Serial.printf("[Web] Power-Threshold gesetzt: %d W\n", thresh);
+    } else {
+      _server.send(400, "application/json", "{\"error\":\"invalid power_threshold\"}");
+      return;
+    }
+  }
+
+  // Fall-through back to transmitting the fresh configurations safely
+  handleApiSettings();
 }
 
 void WebPortal::handleReadme() {
@@ -437,6 +473,5 @@ void WebPortal::handleReadme() {
 }
 
 void WebPortal::handleNotFound() {
-  // Unbekannte Pfade → Captive Portal (verhindert Browser-Fehlermeldungen)
   handleCaptivePortal();
 }
