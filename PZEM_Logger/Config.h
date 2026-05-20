@@ -20,6 +20,9 @@
 #define INTERVAL_SD_FLUSH_MS         10000
 #define INTERVAL_LED_OK_MS          500    // 1 Hz
 #define INTERVAL_LED_ERR_MS         100    // 5 Hz
+
+// ===== Log-Bedingungen =====
+#define DEFAULT_POWER_THRESHOLD_W    0.0f  // 0 = no limit
  
 // ===== Fehler-Toleranz =====
 // PZEM gilt erst nach so vielen aufeinanderfolgenden Lesefehlern als defekt.
