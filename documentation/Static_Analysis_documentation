@@ -1,0 +1,54 @@
+# Electrocution Data Logger: Static Code Analysis Documentation
+
+This document outlines the scope, coverage, and limitations of the static code analysis performed on the firmware source code in the Electrocution Data Logger project.
+
+## Overview
+
+The static analysis job runs as an independent step in the CI pipeline using **cppcheck**, a popular static analysis tool for C/C++ code. Unlike unit tests or firmware compilation, static analysis **does not execute the code**. Instead, it parses the source files line by line to detect logical errors, memory bugs, and dangerous coding patterns that the compiler might silently ignore.
+
+The pipeline runs `cppcheck` with the `--enable=all` flag on the core firmware files (`Config.h`, `Logger.h`, `StatusLed.h`, `WebPortal.h`, `WebPortal.cpp`, and `PZEM_Logger.ino`) targeting the C++11 standard.
+
+---
+
+## What the Static Analysis Covers (Code Health & Safety)
+
+Static analysis focuses on the syntactical and structural health of the code. It automatically flags the following categories of issues:
+
+### 1. Memory and Resource Management
+- **Uninitialized Variables:** Detects instances where variables (like pointers or primitive types) are used before being assigned a value.
+- **Out of Bounds (Buffer Overflows):** Checks array indexing (such as iterating over `_buffer[RAM_BUFFER_SIZE]`) to ensure the code does not read or write outside allocated memory boundaries.
+- **Memory Leaks:** Flags dynamically allocated memory (`new`/`malloc`) that is never freed (though firmware typically avoids dynamic allocation, this ensures adherence to safe practices).
+
+### 2. Undefined Behavior & Logic Errors
+- **Null Pointer Dereferences:** Ensures pointers are not accessed if they could potentially evaluate to `nullptr`.
+- **Division by Zero:** Detects hardcoded or inferable paths where a mathematical operation divides by zero.
+- **Dead Code:** Identifies unreachable code blocks (e.g., code written after a `return` statement or inside an impossible `if` condition).
+
+### 3. Variable Scope and Usage
+- **Unused Variables and Functions:** Highlights declared variables or functions that are never actually used, helping to reduce firmware bloat.
+- **Variable Shadowing:** Warns if a local variable shares the same name as a class member or global variable, preventing accidental assignments.
+
+### 4. Style and Best Practices
+- Checks for missing `const` modifiers on methods that don't modify class state (like `getLastVoltage() const`).
+- Flags inefficient parameter passing (e.g., passing large structs by value instead of `const` reference).
+
+---
+
+## What is NOT Covered (The Logic & Execution)
+
+Because static analysis only reads the text of your source code and does not execute it, it has significant limitations regarding runtime behavior and business rules.
+
+### 1. Business Logic and Requirements
+- Static analysis has no concept of what the device is *supposed* to do. It cannot detect that "The logger must only start if power > 5 W." If you write valid C++ that logs every milliwatt, `cppcheck` will pass it flawlessly.
+- It does not verify state machine transitions (e.g., it doesn't know if `pzemOk()` behaves correctly; it only knows `pzemOk()` is syntactically correct).
+
+### 2. Runtime Execution and Timing
+- It cannot detect race conditions across hardware interrupts or multi-threading (like ESP32 FreeRTOS tasks).
+- Timing logic, such as whether `millis() - _lastPollMs < INTERVAL` fires accurately, is completely ignored. 
+
+### 3. Hardware and Third-Party Libraries
+- The pipeline intentionally suppresses errors related to missing system libraries (`--suppress=missingIncludeSystem`, `--suppress=missingInclude`). Therefore, it does not analyze the underlying `Arduino.h`, `SD.h`, or `PZEM004Tv30.h` files. 
+- It cannot detect hardware-specific bugs, such as writing to an invalid ESP32 GPIO pin or misconfiguring the SPI bus parameters.
+
+### 4. Compiler-Specific Quirks
+- `cppcheck` analyzes against generic C++11 standards. It might pass code that the specific Espressif GCC toolchain later rejects, which is why the actual "Compile firmware" CI job remains necessary.
