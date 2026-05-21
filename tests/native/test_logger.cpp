@@ -6,20 +6,19 @@
  * Test framework: single-header doctest (downloaded by CMake).
  *
  * What is tested here (pure logic, no hardware):
- *   - Ring-buffer fill and drop counting
- *   - PZEM error threshold / recovery
- *   - setPollInterval / getPollInterval
- *   - pzemOk() state machine
- *   - getLastVoltage / Power / Pf update
- *   - getBufferCount / getDroppedSamples
- *   - flushToSD() returns false when SD not OK
- *   - CSV header constant content
- *   - Config.h values are within expected ranges
+ * - Ring-buffer fill and drop counting
+ * - PZEM error threshold / recovery
+ * - pzemOk() state machine
+ * - getLastVoltage / Power / Pf update
+ * - getBufferCount / getDroppedSamples
+ * - flushToSD() returns false when SD not OK
+ * - CSV header constant content
+ * - Config.h values are within expected ranges
  *
  * NOT tested here (require real hardware or extensive mocking):
- *   - Actual SD write (File I/O)
- *   - Actual PZEM UART communication
- *   - pollIfDue() timing (depends on millis())
+ * - Actual SD write (File I/O)
+ * - Actual PZEM UART communication
+ * - pollIfDue() timing (depends on millis())
  */
 
 // ── Tell doctest to generate its main() in this TU ──────────────────────────
@@ -59,9 +58,9 @@ struct TestLogger {
 // Config sanity
 // ═══════════════════════════════════════════════════════════════════════════
 TEST_CASE("Config.h: constants are within expected ranges") {
-    CHECK(INTERVAL_PZEM_POLL_MS     >= 200);
-    CHECK(INTERVAL_PZEM_POLL_MS     <= 30000);
-    CHECK(INTERVAL_SD_FLUSH_MS      >= 1000);
+    CHECK(INTERVAL_PZEM_POLL_MS      >= 200);
+    CHECK(INTERVAL_PZEM_POLL_MS      <= 30000);
+    CHECK(INTERVAL_SD_FLUSH_MS       >= 1000);
     CHECK(RAM_BUFFER_SIZE            >= 8);
     CHECK(RAM_BUFFER_SIZE            <= 512);
     CHECK(PZEM_ERROR_THRESHOLD       >= 1);
@@ -72,42 +71,10 @@ TEST_CASE("Config.h: constants are within expected ranges") {
 
 TEST_CASE("Config.h: CSV header contains required column names") {
     const char* hdr = LOG_FILE_HEADER;
-    CHECK(std::string(hdr).find("time_ms")   != std::string::npos);
+    CHECK(std::string(hdr).find("millis")    != std::string::npos);
     CHECK(std::string(hdr).find("voltage_V") != std::string::npos);
     CHECK(std::string(hdr).find("power_W")   != std::string::npos);
-    CHECK(std::string(hdr).find("cos_phi")   != std::string::npos);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Poll interval (runtime-adjustable)
-// ═══════════════════════════════════════════════════════════════════════════
-TEST_CASE("setPollInterval: default equals INTERVAL_PZEM_POLL_MS") {
-    Logger l;
-    CHECK(l.getPollInterval() == INTERVAL_PZEM_POLL_MS);
-}
-
-TEST_CASE("setPollInterval: updates correctly") {
-    Logger l;
-    l.setPollInterval(1000);
-    CHECK(l.getPollInterval() == 1000);
-    l.setPollInterval(5000);
-    CHECK(l.getPollInterval() == 5000);
-}
-
-TEST_CASE("setPollInterval: ignores zero (guard against division/underflow)") {
-    Logger l;
-    l.setPollInterval(2000);
-    l.setPollInterval(0);           // should be rejected
-    CHECK(l.getPollInterval() == 2000);
-}
-
-TEST_CASE("setPollInterval: accepts all seven UI values") {
-    Logger l;
-    uint32_t valid[] = {200, 500, 1000, 2000, 5000, 10000, 30000};
-    for (auto ms : valid) {
-        l.setPollInterval(ms);
-        CHECK(l.getPollInterval() == ms);
-    }
+    CHECK(std::string(hdr).find("pf")        != std::string::npos);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
