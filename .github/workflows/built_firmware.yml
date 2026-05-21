@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Three independent jobs run in parallel:
 #   1. unit-tests   – native Linux build, no hardware, fast (~30s)
