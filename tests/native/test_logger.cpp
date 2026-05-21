@@ -24,7 +24,7 @@
 
 // ── Tell doctest to generate its main() in this TU ──────────────────────────
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 // ── Redirect Arduino HAL to our stubs ───────────────────────────────────────
 #include "arduino_mock.h"
@@ -263,4 +263,3 @@ TEST_CASE("Sample struct: fields store and retrieve correctly") {
     CHECK(s.power_W    == doctest::Approx(1500.0f));
     CHECK(s.pf         == doctest::Approx(0.99f));
 }
-
